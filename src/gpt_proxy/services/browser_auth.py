@@ -58,22 +58,26 @@ class BrowserAuthManager:
 
         try:
             logger.info("Navigating to ChatGPT...")
-            await page.goto(self.CHATGPT_URL, wait_until="networkidle")
+            print(">>> Browser: Navigating to ChatGPT...")  # Debug output
+            await page.goto(self.CHATGPT_URL, wait_until="networkidle", timeout=60000)
 
             # Check if already logged in
             cookies = await self._context.cookies()
             for cookie in cookies:
                 if cookie["name"] == self.SESSION_COOKIE_NAME:
                     logger.info("Found existing session token")
+                    print(">>> Browser: Found existing session token")  # Debug output
                     return cookie["value"]
 
             if wait_for_login:
                 logger.info("Waiting for user to login...")
+                print(f">>> Browser: Waiting for user to login (timeout: {timeout}s)...")  # Debug output
                 # Wait for redirect to chat page (indicates successful login)
                 try:
                     await page.wait_for_url("**/chat*", timeout=timeout * 1000)
-                except Exception:
-                    logger.warning("Login timeout or cancelled")
+                except Exception as e:
+                    logger.warning(f"Login timeout or cancelled: {e}")
+                    print(f">>> Browser: Login timeout or cancelled: {e}")  # Debug output
                     return None
 
                 # Extract session token after login
@@ -81,12 +85,14 @@ class BrowserAuthManager:
                 for cookie in cookies:
                     if cookie["name"] == self.SESSION_COOKIE_NAME:
                         logger.info("Successfully extracted session token")
+                        print(">>> Browser: Successfully extracted session token")  # Debug output
                         return cookie["value"]
 
             return None
 
         except Exception as e:
             logger.error(f"Error getting session token: {e}")
+            print(f">>> Browser Error: {e}")  # Debug output
             return None
         finally:
             await page.close()
