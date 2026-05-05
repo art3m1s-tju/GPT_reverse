@@ -6,81 +6,57 @@ from rich.console import Console
 from rich.table import Table
 import uvicorn
 
-from gpt_proxy.config import settings
-
 app = typer.Typer(
     name="gpt-proxy",
-    help="Local ChatGPT reverse proxy with API key management",
+    help="ChatGPT reverse proxy - Use ChatGPT without API keys!",
 )
 console = Console()
 
 
 @app.command()
 def serve(
-    host: str = typer.Option(settings.app_host, "--host", "-h", help="Host to bind to"),
-    port: int = typer.Option(settings.app_port, "--port", "-p", help="Port to bind to"),
-    reload: bool = typer.Option(False, "--reload", "-r", help="Enable auto-reload for development"),
-    workers: int = typer.Option(1, "--workers", "-w", help="Number of worker processes"),
+    host: str = typer.Option("0.0.0.0", "--host", "-h", help="Host to bind to"),
+    port: int = typer.Option(8000, "--port", "-p", help="Port to bind to"),
+    reload: bool = typer.Option(False, "--reload", "-r", help="Enable auto-reload"),
 ):
     """Start the proxy server."""
-    console.print(f"[green]Starting GPT Proxy on {host}:{port}[/green]")
+    console.print("[green]Starting ChatGPT Reverse Proxy...[/green]")
+    console.print(f"[cyan]Server: http://{host}:{port}[/cyan]")
+    console.print(f"[cyan]Docs: http://{host}:{port}/docs[/cyan]")
+    console.print("")
+    console.print("[yellow]How to use:[/yellow]")
+    console.print("1. Login to chat.openai.com")
+    console.print("2. Get session token from browser cookies")
+    console.print("3. POST to /auth/login with session token")
+    console.print("4. Use returned session_id as Bearer token")
+    console.print("")
 
-    if reload:
-        # Development mode with reload
-        uvicorn.run(
-            "gpt_proxy.main:app",
-            host=host,
-            port=port,
-            reload=True,
-        )
-    else:
-        # Production mode
-        uvicorn.run(
-            "gpt_proxy.main:app",
-            host=host,
-            port=port,
-            workers=workers,
-        )
-
-
-@app.command()
-def keys():
-    """Manage API keys."""
-    if not settings.openai_api_keys:
-        console.print("[yellow]No API keys configured.[/yellow]")
-        console.print("Set OPENAI_API_KEYS environment variable.")
-        return
-
-    table = Table(title="Configured API Keys")
-    table.add_column("Index", style="cyan")
-    table.add_column("Key (masked)", style="green")
-    table.add_column("Status", style="yellow")
-
-    for i, key in enumerate(settings.openai_api_keys):
-        # Mask the key
-        masked = f"{key[:8]}...{key[-4:]}" if len(key) > 12 else "***"
-        table.add_row(str(i), masked, "active")
-
-    console.print(table)
+    uvicorn.run(
+        "gpt_proxy.main:app",
+        host=host,
+        port=port,
+        reload=reload,
+    )
 
 
 @app.command()
-def config():
-    """Show current configuration."""
-    table = Table(title="Configuration")
-    table.add_column("Setting", style="cyan")
-    table.add_column("Value", style="green")
-
-    config_dict = settings.model_dump()
-    for key, value in config_dict.items():
-        # Mask sensitive values
-        if "key" in key.lower() and isinstance(value, list) and value:
-            value = f"{len(value)} keys configured"
-        elif "key" in key.lower() and isinstance(value, str) and value:
-            value = "***"
-        table.add_row(key, str(value))
-
-    console.print(table)
+def help_token():
+    """Show how to get ChatGPT session token."""
+    console.print("[bold green]How to get ChatGPT session token:[/bold green]")
+    console.print("")
+    console.print("[bold]Method 1: Browser DevTools[/bold]")
+    console.print("1. Go to https://chat.openai.com and login")
+    console.print("2. Press F12 to open DevTools")
+    console.print("3. Go to Application > Cookies > chat.openai.com")
+    console.print("4. Find '__Secure-next-auth.session-token'")
+    console.print("5. Copy its value")
+    console.print("")
+    console.print("[bold]Method 2: Browser Console[/bold]")
+    console.print("Run this in browser console on chat.openai.com:")
+    console.print("")
+    console.print("[cyan]document.cookie.split('; ').find(c => c.startsWith('__Secure-next-auth.session-token='))?.split('=')[1][/cyan]")
+    console.print("")
+    console.print("[yellow]Note: Session tokens expire periodically. Get a fresh one if login fails.[/yellow]")
 
 
 @app.command()

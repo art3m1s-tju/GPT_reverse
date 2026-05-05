@@ -28,38 +28,20 @@ async def client() -> AsyncGenerator[AsyncClient, None]:
 
 
 @pytest.fixture
-def mock_openai_response():
-    """Mock OpenAI chat completion response."""
-    return {
-        "id": "chatcmpl-test123",
-        "object": "chat.completion",
-        "created": 1234567890,
-        "model": "gpt-4o-mini",
-        "choices": [
-            {
-                "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": "Hello! How can I help you today?",
-                },
-                "finish_reason": "stop",
-            }
-        ],
-        "usage": {
-            "prompt_tokens": 10,
-            "completion_tokens": 8,
-            "total_tokens": 18,
-        },
-    }
+def mock_session_token():
+    """Mock ChatGPT session token."""
+    return "mock-session-token-for-testing"
 
 
 @pytest.fixture
-def mock_streaming_chunks():
-    """Mock SSE streaming chunks."""
-    return [
-        b'data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o-mini","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}\n\n',
-        b'data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o-mini","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}\n\n',
-        b'data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o-mini","choices":[{"index":0,"delta":{"content":"!"},"finish_reason":null}]}\n\n',
-        b'data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o-mini","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n',
-        b'data: [DONE]\n\n',
-    ]
+def mock_auth_response():
+    """Mock authentication response from ChatGPT."""
+    return {
+        "user": {
+            "id": "user-123",
+            "email": "test@example.com",
+            "name": "Test User",
+        },
+        "accessToken": "mock-access-token-12345",
+        "expires": "2025-01-01T00:00:00Z",
+    }

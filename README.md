@@ -1,128 +1,136 @@
 # GPT Reverse Proxy
 
-A local ChatGPT reverse proxy with API key management, rate limiting, cost tracking, and request logging.
+**Use ChatGPT without API keys!** Login with your ChatGPT account session token.
 
-## Features
+## Why This Project?
 
-- **Multi-key Management**: Rotate between multiple OpenAI API keys with various strategies
-- **Full API Coverage**: Proxy all OpenAI API endpoints (chat, embeddings, images, audio, etc.)
-- **Streaming Support**: Properly handle SSE streaming responses
-- **Rate Limiting**: Built-in rate limiting with configurable limits
-- **Cost Tracking**: Track token usage and costs per key/model
-- **Request Logging**: Structured logging of all requests and responses
-- **Response Caching**: Optional caching for identical requests
-- **CLI Interface**: Easy-to-use command line interface
-- **Docker Ready**: Containerized deployment with Docker Compose
+- **No API keys needed** - Use your existing ChatGPT account
+- **Free to use** - No need to pay for API access
+- **Same models** - Access GPT-4, GPT-3.5, etc. through your subscription
+- **Simple setup** - Just copy a cookie from your browser
 
 ## Quick Start
 
-### Installation
+### 1. Install
 
 ```bash
-# Clone the repository
-git clone https://github.com/art3m1s-tju/GPT_reverse.git
-cd GPT_reverse
-
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # or `venv\Scripts\activate` on Windows
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Copy environment file
-cp .env.example .env
-# Edit .env and add your OpenAI API keys
+pip install -e .
 ```
 
-### Running
+### 2. Get Session Token
+
+1. Go to [chat.openai.com](https://chat.openai.com) and login
+2. Press `F12` to open DevTools
+3. Go to **Application** > **Cookies** > **chat.openai.com**
+4. Find `__Secure-next-auth.session-token` cookie
+5. Copy its value
+
+Or run this in browser console:
+```javascript
+document.cookie.split('; ').find(c => c.startsWith('__Secure-next-auth.session-token='))?.split('=')[1]
+```
+
+### 3. Start Proxy
 
 ```bash
-# Start the proxy server
-python -m gpt_proxy serve
-
-# Or use the CLI
-gpt-proxy serve --host 0.0.0.0 --port 8000
+gpt-proxy serve
 ```
 
-### Usage
+### 4. Login
 
-Point your OpenAI client to the proxy:
+```bash
+curl -X POST http://localhost:8000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"session_token": "your-token-here"}'
+```
+
+Response:
+```json
+{
+  "session_id": "abc123...",
+  "user_email": "your@email.com",
+  "expires_at": "2024-...",
+  "message": "Login successful. Use session_id as Bearer token in API requests."
+}
+```
+
+### 5. Use API
+
+```bash
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Authorization: Bearer <session_id>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-4",
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'
+```
+
+## Python Client
 
 ```python
-from openai import OpenAI
+import httpx
 
-client = OpenAI(
+# Login
+login_resp = httpx.post(
+    "http://localhost:8000/auth/login",
+    json={"session_token": "your-token"}
+)
+session_id = login_resp.json()["session_id"]
+
+# Chat
+client = httpx.Client(
     base_url="http://localhost:8000/v1",
-    api_key="any-key"  # The proxy will use its configured keys
+    headers={"Authorization": f"Bearer {session_id}"}
 )
 
-response = client.chat.completions.create(
-    model="gpt-4o-mini",
-    messages=[{"role": "user", "content": "Hello!"}]
+response = client.post(
+    "/chat/completions",
+    json={
+        "model": "gpt-4",
+        "messages": [{"role": "user", "content": "Hello!"}]
+    }
 )
+print(response.json())
 ```
+
+## API Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `POST /auth/login` | Login with session token |
+| `GET /auth/help` | How to get session token |
+| `GET /auth/sessions` | List active sessions |
+| `POST /auth/logout` | Logout session |
+| `POST /v1/chat/completions` | Chat completions |
+| `GET /v1/models` | List models |
 
 ## CLI Commands
 
 ```bash
 # Start server
-gpt-proxy serve
+gpt-proxy serve --port 8000
 
-# Manage API keys
-gpt-proxy keys list
-gpt-proxy keys add sk-xxx
-gpt-proxy keys rotate
+# Show how to get token
+gpt-proxy help-token
 
-# View logs
-gpt-proxy logs
-gpt-proxy logs --follow
-
-# View statistics
-gpt-proxy stats --period day
-
-# Show configuration
-gpt-proxy config --show
+# Show version
+gpt-proxy version
 ```
-
-## Configuration
-
-Configuration is done via environment variables or `.env` file:
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `APP_HOST` | Server host | `0.0.0.0` |
-| `APP_PORT` | Server port | `8000` |
-| `OPENAI_API_KEYS` | Comma-separated API keys | Required |
-| `OPENAI_KEY_ROTATION_STRATEGY` | Key rotation strategy | `round-robin` |
-| `RATE_LIMIT_REQUESTS_PER_MINUTE` | Rate limit | `60` |
-| `CACHE_ENABLED` | Enable response caching | `false` |
-| `LOG_LEVEL` | Logging level | `INFO` |
 
 ## Docker
 
 ```bash
-# Build image
 docker build -t gpt-proxy -f docker/Dockerfile .
-
-# Run container
-docker run -p 8000:8000 -e OPENAI_API_KEYS=sk-xxx gpt-proxy
-
-# Or with docker-compose
-docker-compose -f docker/docker-compose.yml up
+docker run -p 8000:8000 gpt-proxy
 ```
 
-## API Endpoints
+## Notes
 
-All OpenAI API endpoints are proxied:
-
-- `POST /v1/chat/completions` - Chat completions
-- `POST /v1/embeddings` - Create embeddings
-- `POST /v1/images/generations` - Generate images
-- `POST /v1/audio/speech` - Text-to-speech
-- `POST /v1/audio/transcriptions` - Speech-to-text
-- `GET /v1/models` - List models
-- `POST /v1/moderations` - Content moderation
+- **Session tokens expire** - Get a fresh token if you get 401 errors
+- **Rate limits apply** - Same limits as your ChatGPT web access
+- **Subscription required** - GPT-4 requires ChatGPT Plus subscription
+- **Unofficial API** - This uses ChatGPT's backend API, not the official OpenAI API
 
 ## License
 
