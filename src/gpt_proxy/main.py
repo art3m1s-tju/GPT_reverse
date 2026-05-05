@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 
 from gpt_proxy.config import settings
 from gpt_proxy.services.auth_manager import close_auth_manager
+from gpt_proxy.services.browser_auth import close_browser_auth
 from gpt_proxy.api.router import router as api_router
 from gpt_proxy.api.auth_router import router as auth_router
 
@@ -17,6 +18,7 @@ async def lifespan(app: FastAPI):
     yield
     # Shutdown
     await close_auth_manager()
+    await close_browser_auth()
 
 
 def create_app() -> FastAPI:

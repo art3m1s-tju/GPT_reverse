@@ -123,3 +123,71 @@ async def auth_help():
         "document.cookie.split('; ').find(c => c.startsWith('__Secure-next-auth.session-token='))?.split('=')[1]",
         "note": "Session tokens expire after some time. You may need to refresh them periodically.",
     }
+
+
+@router.post("/login/browser", response_model=LoginResponse)
+async def login_via_browser(
+    timeout: int = 300,
+    auth: AuthManager = Depends(get_auth),
+):
+    """Login via automated browser.
+
+    Opens a browser window for user to login to ChatGPT,
+    then automatically extracts session token.
+
+    Args:
+        timeout: Maximum seconds to wait for login (default 5 minutes)
+    """
+    from gpt_proxy.services.browser_auth import get_browser_auth, close_browser_auth
+
+    browser_auth = get_browser_auth()
+
+    try:
+        # Get session token from browser
+        session_token = await browser_auth.get_session_token(
+            wait_for_login=True,
+            timeout=timeout
+        )
+
+        if not session_token:
+            raise HTTPException(
+                status_code=401,
+                detail="Login failed or timed out. Please try again."
+            )
+
+        # Exchange for access token
+        session = await auth.exchange_session_token(session_token)
+        if not session:
+            raise HTTPException(
+                status_code=401,
+                detail="Failed to exchange session token."
+            )
+
+        auth.create_session(session)
+
+        return LoginResponse(
+            session_id=session.session_id,
+            user_email=session.email,
+            expires_at=session.expires_at.isoformat(),
+            message="Browser login successful!"
+        )
+    finally:
+        await close_browser_auth()
+
+
+@router.get("/login/status")
+async def check_browser_login_status():
+    """Check if user is logged in via browser profile."""
+    from gpt_proxy.services.browser_auth import get_browser_auth
+
+    browser_auth = get_browser_auth()
+    await browser_auth.initialize(headless=True)
+
+    try:
+        session_token = await browser_auth.get_session_token(wait_for_login=False)
+        return {
+            "logged_in": session_token is not None,
+            "message": "Already logged in" if session_token else "Not logged in"
+        }
+    finally:
+        await browser_auth.close()

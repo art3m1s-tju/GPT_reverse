@@ -66,5 +66,39 @@ def version():
     console.print(f"[green]GPT Proxy v{__version__}[/green]")
 
 
+@app.command()
+def login(
+    timeout: int = typer.Option(300, "--timeout", "-t", help="Login timeout in seconds"),
+):
+    """Login via browser - opens a window for ChatGPT login."""
+    import httpx
+
+    console.print("[green]Opening browser for ChatGPT login...[/green]")
+    console.print("[yellow]Please login in the browser window.[/yellow]")
+
+    try:
+        response = httpx.post(
+            "http://localhost:8000/auth/login/browser",
+            params={"timeout": timeout},
+            timeout=timeout + 10
+        )
+
+        if response.status_code == 200:
+            data = response.json()
+            console.print(f"[green]Login successful![/green]")
+            console.print(f"[cyan]Email: {data['user_email']}[/cyan]")
+            console.print(f"[cyan]Session ID: {data['session_id']}[/cyan]")
+            console.print("")
+            console.print("[yellow]Use this session_id as Bearer token:[/yellow]")
+            console.print(f"[white]Authorization: Bearer {data['session_id']}[/white]")
+        else:
+            console.print(f"[red]Login failed: {response.json()}[/red]")
+    except httpx.ConnectError:
+        console.print("[red]Error: Could not connect to server.[/red]")
+        console.print("[yellow]Make sure the server is running: gpt-proxy serve[/yellow]")
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+
+
 if __name__ == "__main__":
     app()
