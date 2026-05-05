@@ -49,6 +49,10 @@ class Settings(BaseSettings):
     # Cost Tracking
     cost_tracking_enabled: bool = True
 
+    # Browser Auth (代理设置)
+    browser_proxy: str = ""  # 例如: "http://127.0.0.1:7890"
+    browser_profile_dir: str = "./browser_profile"
+
     @field_validator("openai_api_keys", mode="before")
     @classmethod
     def parse_keys(cls, v: str | list[str]) -> list[str]:

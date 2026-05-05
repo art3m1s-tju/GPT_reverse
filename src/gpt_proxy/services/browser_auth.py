@@ -5,6 +5,7 @@ from typing import Optional
 from pathlib import Path
 from logging import getLogger
 import asyncio
+import os
 
 logger = getLogger(__name__)
 
@@ -15,11 +16,13 @@ class BrowserAuthManager:
     CHATGPT_URL = "https://chat.openai.com"
     SESSION_COOKIE_NAME = "__Secure-next-auth.session-token"
 
-    def __init__(self, profile_dir: str = "./browser_profile"):
+    def __init__(self, profile_dir: str = "./browser_profile", proxy: str = None):
         self.profile_dir = Path(profile_dir)
         self.profile_dir.mkdir(parents=True, exist_ok=True)
         self._playwright = None
         self._context: Optional[BrowserContext] = None
+        # 代理设置，从环境变量或参数获取
+        self.proxy = proxy or os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
 
     async def initialize(self, headless: bool = False):
         """Initialize browser context with persistent profile.
@@ -28,13 +31,21 @@ class BrowserAuthManager:
             headless: If False, shows browser window for user interaction
         """
         self._playwright = await async_playwright().start()
-        self._context = await self._playwright.chromium.launch_persistent_context(
-            str(self.profile_dir),
-            headless=headless,
-            viewport={"width": 1280, "height": 800},
-            user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            locale="en-US",
-        )
+
+        launch_options = {
+            "user_data_dir": str(self.profile_dir),
+            "headless": headless,
+            "viewport": {"width": 1280, "height": 800},
+            "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "locale": "en-US",
+        }
+
+        # 添加代理支持
+        if self.proxy:
+            print(f">>> Browser: Using proxy: {self.proxy}")
+            launch_options["proxy"] = {"server": self.proxy}
+
+        self._context = await self._playwright.chromium.launch_persistent_context(**launch_options)
         logger.info(f"Browser initialized with profile: {self.profile_dir}")
 
     async def get_session_token(
@@ -116,7 +127,11 @@ def get_browser_auth() -> BrowserAuthManager:
     """Get the global browser auth instance."""
     global _browser_auth
     if _browser_auth is None:
-        _browser_auth = BrowserAuthManager()
+        from gpt_proxy.config import settings
+        _browser_auth = BrowserAuthManager(
+            profile_dir=settings.browser_profile_dir,
+            proxy=settings.browser_proxy or None
+        )
     return _browser_auth
 
 
