@@ -126,12 +126,20 @@ _browser_auth: BrowserAuthManager | None = None
 def get_browser_auth() -> BrowserAuthManager:
     """Get the global browser auth instance."""
     global _browser_auth
+    from gpt_proxy.config import settings
+
+    # 每次都重新创建，确保使用最新配置
     if _browser_auth is None:
-        from gpt_proxy.config import settings
         _browser_auth = BrowserAuthManager(
             profile_dir=settings.browser_profile_dir,
             proxy=settings.browser_proxy or None
         )
+
+    # 确保代理设置正确
+    if settings.browser_proxy and _browser_auth.proxy != settings.browser_proxy:
+        _browser_auth.proxy = settings.browser_proxy
+        print(f">>> Browser: Updated proxy to: {settings.browser_proxy}")
+
     return _browser_auth
 
 

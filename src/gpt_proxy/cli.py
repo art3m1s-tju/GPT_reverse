@@ -75,27 +75,38 @@ def login(
 
     console.print("[green]Opening browser for ChatGPT login...[/green]")
     console.print("[yellow]Please login in the browser window.[/yellow]")
+    console.print("[cyan]Waiting for response (this may take a while)...[/cyan]")
 
     try:
-        response = httpx.post(
-            "http://localhost:8000/auth/login/browser",
-            params={"timeout": timeout},
-            timeout=timeout + 10
-        )
+        with httpx.Client(timeout=timeout + 60) as client:
+            response = client.post(
+                "http://localhost:8000/auth/login/browser",
+                params={"timeout": timeout},
+            )
 
-        if response.status_code == 200:
-            data = response.json()
-            console.print(f"[green]Login successful![/green]")
-            console.print(f"[cyan]Email: {data['user_email']}[/cyan]")
-            console.print(f"[cyan]Session ID: {data['session_id']}[/cyan]")
-            console.print("")
-            console.print("[yellow]Use this session_id as Bearer token:[/yellow]")
-            console.print(f"[white]Authorization: Bearer {data['session_id']}[/white]")
-        else:
-            console.print(f"[red]Login failed: {response.json()}[/red]")
+            console.print(f"[dim]Response status: {response.status_code}[/dim]")
+            console.print(f"[dim]Response content: {response.text[:200] if response.text else 'empty'}[/dim]")
+
+            if response.status_code == 200:
+                data = response.json()
+                console.print(f"[green]Login successful![/green]")
+                console.print(f"[cyan]Email: {data['user_email']}[/cyan]")
+                console.print(f"[cyan]Session ID: {data['session_id']}[/cyan]")
+                console.print("")
+                console.print("[yellow]Use this session_id as Bearer token:[/yellow]")
+                console.print(f"[white]Authorization: Bearer {data['session_id']}[/white]")
+            else:
+                try:
+                    error_data = response.json()
+                    console.print(f"[red]Login failed: {error_data}[/red]")
+                except:
+                    console.print(f"[red]Login failed: {response.text or 'Unknown error'}[/red]")
     except httpx.ConnectError:
         console.print("[red]Error: Could not connect to server.[/red]")
         console.print("[yellow]Make sure the server is running: gpt-proxy serve[/yellow]")
+    except httpx.TimeoutException:
+        console.print("[red]Error: Request timed out.[/red]")
+        console.print("[yellow]The server may still be processing. Check the server logs.[/yellow]")
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")
 
