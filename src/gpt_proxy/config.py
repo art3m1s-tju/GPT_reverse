@@ -53,6 +53,10 @@ class Settings(BaseSettings):
     browser_proxy: str = ""  # 例如: "http://127.0.0.1:7890"
     browser_profile_dir: str = "./browser_profile"
 
+    # HTTP Client
+    http_timeout: float = 30.0
+    http_connect_timeout: float = 10.0
+
     @field_validator("openai_api_keys", mode="before")
     @classmethod
     def parse_keys(cls, v: str | list[str]) -> list[str]:

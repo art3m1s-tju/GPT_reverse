@@ -7,6 +7,10 @@ import httpx
 import secrets
 import asyncio
 from logging import getLogger
+import json
+from pathlib import Path
+
+from gpt_proxy.config import settings
 
 logger = getLogger(__name__)
 
@@ -31,20 +35,76 @@ class AuthManager:
     CHATGPT_API_BASE = "https://chat.openai.com"
     SESSION_API = f"{CHATGPT_API_BASE}/api/auth/session"
     BACKEND_API = f"{CHATGPT_API_BASE}/backend-api"
+    SESSION_FILE = Path("./sessions.json")
 
     def __init__(self):
         self.sessions: dict[str, UserSession] = {}
         self._lock = asyncio.Lock()
         self._client: httpx.AsyncClient | None = None
+        self._load_sessions()
+
+    def _load_sessions(self):
+        """Load sessions from disk."""
+        if self.SESSION_FILE.exists():
+            try:
+                with open(self.SESSION_FILE) as f:
+                    data = json.load(f)
+                    for sid, sdata in data.items():
+                        sdata["expires_at"] = datetime.fromisoformat(sdata["expires_at"])
+                        sdata["created_at"] = datetime.fromisoformat(sdata["created_at"])
+                        self.sessions[sid] = UserSession(**sdata)
+                logger.info(f"Loaded {len(self.sessions)} sessions from disk")
+            except Exception as e:
+                logger.warning(f"Failed to load sessions: {e}")
+
+    def _save_sessions(self):
+        """Save sessions to disk."""
+        try:
+            data = {}
+            for sid, session in self.sessions.items():
+                if session.is_active:
+                    data[sid] = {
+                        "session_id": session.session_id,
+                        "user_id": session.user_id,
+                        "email": session.email,
+                        "access_token": session.access_token,
+                        "session_token": session.session_token,
+                        "expires_at": session.expires_at.isoformat(),
+                        "created_at": session.created_at.isoformat(),
+                        "request_count": session.request_count,
+                        "is_active": session.is_active,
+                    }
+            with open(self.SESSION_FILE, "w") as f:
+                json.dump(data, f, indent=2)
+        except Exception as e:
+            logger.warning(f"Failed to save sessions: {e}")
 
     async def _get_client(self) -> httpx.AsyncClient:
-        """Get or create HTTP client."""
+        """Get or create HTTP client with proxy support."""
         if self._client is None or self._client.is_closed:
-            self._client = httpx.AsyncClient(
-                timeout=httpx.Timeout(30.0, connect=10.0),
-                follow_redirects=True,
-            )
+            client_kwargs = {
+                "timeout": httpx.Timeout(settings.http_timeout, connect=settings.http_connect_timeout),
+                "follow_redirects": True,
+            }
+            if settings.browser_proxy:
+                client_kwargs["proxy"] = settings.browser_proxy
+                logger.info(f"AuthManager using proxy: {settings.browser_proxy}")
+            self._client = httpx.AsyncClient(**client_kwargs)
         return self._client
+
+    def _is_cloudflare_challenge(self, response: httpx.Response) -> bool:
+        """Detect if response is a Cloudflare challenge page."""
+        if response.status_code in [403, 503]:
+            body = response.text or ""
+            indicators = [
+                "cloudflare",
+                "cf-browser-verification",
+                "challenge-platform",
+                "Just a moment...",
+                "Checking your browser",
+            ]
+            return any(indicator.lower() in body.lower() for indicator in indicators)
+        return False
 
     async def exchange_session_token(self, session_token: str) -> Optional[UserSession]:
         """Exchange ChatGPT session token for access token.
@@ -67,11 +127,32 @@ class AuthManager:
                 },
             )
 
-            if response.status_code != 200:
-                logger.warning(f"Session token exchange failed: {response.status_code}")
+            logger.debug(f"Session API response: status={response.status_code}")
+
+            # Check for Cloudflare challenge
+            if self._is_cloudflare_challenge(response):
+                logger.error("Cloudflare challenge detected. Session may need browser refresh.")
                 return None
 
-            data = response.json()
+            if response.status_code != 200:
+                body_preview = response.text[:500] if response.text else "<empty>"
+                logger.warning(f"Session token exchange failed: status={response.status_code}, body={body_preview}")
+                return None
+
+            # Check content type before parsing
+            content_type = response.headers.get("content-type", "")
+            if "application/json" not in content_type:
+                body_preview = response.text[:500] if response.text else "<empty>"
+                logger.error(f"Unexpected content type: {content_type}, body={body_preview}")
+                return None
+
+            # Safely parse JSON
+            try:
+                data = response.json()
+            except json.JSONDecodeError as json_error:
+                body_preview = response.text[:500] if response.text else "<empty>"
+                logger.error(f"JSON parse error: {json_error}, body={body_preview}")
+                return None
 
             if not data.get("accessToken"):
                 logger.warning("No accessToken in response")
@@ -99,9 +180,57 @@ class AuthManager:
             logger.info(f"Created session for user: {session.email}")
             return session
 
+        except httpx.TimeoutException as e:
+            logger.error(f"Timeout exchanging session token: {e}")
+            return None
         except Exception as e:
             logger.error(f"Error exchanging session token: {e}")
             return None
+
+    async def validate_session_token(self, session_token: str) -> dict:
+        """Validate session token and return basic info without full exchange.
+
+        Returns:
+            dict with keys: valid (bool), error (str|None), user_email (str|None)
+        """
+        client = await self._get_client()
+
+        try:
+            response = await client.get(
+                self.SESSION_API,
+                headers={
+                    "Cookie": f"__Secure-next-auth.session-token={session_token}",
+                    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+                },
+            )
+
+            if self._is_cloudflare_challenge(response):
+                return {"valid": False, "error": "cloudflare_challenge"}
+
+            if response.status_code == 401:
+                return {"valid": False, "error": "invalid_token"}
+
+            if response.status_code != 200:
+                return {"valid": False, "error": f"http_{response.status_code}"}
+
+            try:
+                data = response.json()
+                if data.get("user"):
+                    return {
+                        "valid": True,
+                        "error": None,
+                        "user_email": data["user"].get("email"),
+                    }
+            except json.JSONDecodeError:
+                return {"valid": False, "error": "invalid_response"}
+
+            return {"valid": False, "error": "no_user_data"}
+
+        except httpx.TimeoutException:
+            return {"valid": False, "error": "timeout"}
+        except Exception as e:
+            logger.error(f"Token validation error: {e}")
+            return {"valid": False, "error": str(e)}
 
     async def refresh_session(self, session_id: str) -> bool:
         """Refresh expired access token using session token.
@@ -131,6 +260,7 @@ class AuthManager:
     def create_session(self, session: UserSession) -> str:
         """Store session and return ID."""
         self.sessions[session.session_id] = session
+        self._save_sessions()
         return session.session_id
 
     def get_session(self, session_id: str) -> Optional[UserSession]:

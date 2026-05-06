@@ -84,9 +84,6 @@ def login(
                 params={"timeout": timeout},
             )
 
-            console.print(f"[dim]Response status: {response.status_code}[/dim]")
-            console.print(f"[dim]Response content: {response.text[:200] if response.text else 'empty'}[/dim]")
-
             if response.status_code == 200:
                 data = response.json()
                 console.print(f"[green]Login successful![/green]")
@@ -95,20 +92,46 @@ def login(
                 console.print("")
                 console.print("[yellow]Use this session_id as Bearer token:[/yellow]")
                 console.print(f"[white]Authorization: Bearer {data['session_id']}[/white]")
-            else:
+            elif response.status_code == 401:
+                error_detail = "Unknown error"
                 try:
                     error_data = response.json()
-                    console.print(f"[red]Login failed: {error_data}[/red]")
+                    error_detail = error_data.get("detail", str(error_data))
                 except:
-                    console.print(f"[red]Login failed: {response.text or 'Unknown error'}[/red]")
+                    error_detail = response.text or "Unknown error"
+
+                console.print(f"[red]Login failed: {error_detail}[/red]")
+                console.print("")
+                console.print("[yellow]Troubleshooting tips:[/yellow]")
+                if "cloudflare" in error_detail.lower():
+                    console.print("  [red]Cloudflare challenge detected[/red]")
+                    console.print("  - Try logging in via browser first, then retry")
+                    console.print("  - Consider using a different IP or waiting")
+                elif "timeout" in error_detail.lower():
+                    console.print("  [red]Login took too long[/red]")
+                    console.print("  - Try increasing timeout: gpt-proxy login --timeout 600")
+                elif "proxy" in error_detail.lower() or "connection" in error_detail.lower():
+                    console.print("  [red]Connection/Proxy issue[/red]")
+                    console.print("  - Check your proxy settings in .env (BROWSER_PROXY)")
+                    console.print("  - Verify the proxy URL is correct and accessible")
+                else:
+                    console.print("  [red]Possible causes:[/red]")
+                    console.print("  - Your session may have expired")
+                    console.print("  - Try clearing browser profile: rm -rf ./browser_profile")
+                    console.print("  - Ensure you can access chat.openai.com in your browser")
+            else:
+                console.print(f"[red]Login failed with status {response.status_code}[/red]")
+                console.print(f"[dim]{response.text[:200] if response.text else 'No response body'}[/dim]")
+
     except httpx.ConnectError:
         console.print("[red]Error: Could not connect to server.[/red]")
         console.print("[yellow]Make sure the server is running: gpt-proxy serve[/yellow]")
     except httpx.TimeoutException:
         console.print("[red]Error: Request timed out.[/red]")
-        console.print("[yellow]The server may still be processing. Check the server logs.[/yellow]")
+        console.print("[yellow]Try increasing timeout: gpt-proxy login --timeout 600[/yellow]")
     except Exception as e:
-        console.print(f"[red]Error: {e}[/red]")
+        console.print(f"[red]Unexpected error: {e}[/red]")
+        console.print("[yellow]Check server logs for more details.[/yellow]")
 
 
 if __name__ == "__main__":
