@@ -3,6 +3,7 @@
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Optional, Literal
+import base64
 import httpx
 import secrets
 import asyncio
@@ -52,6 +53,13 @@ class AuthManager:
                     for sid, sdata in data.items():
                         sdata["expires_at"] = datetime.fromisoformat(sdata["expires_at"])
                         sdata["created_at"] = datetime.fromisoformat(sdata["created_at"])
+                        # Decode base64-encoded sensitive fields
+                        try:
+                            sdata["access_token"] = base64.b64decode(sdata["access_token"]).decode()
+                            sdata["session_token"] = base64.b64decode(sdata["session_token"]).decode()
+                        except Exception:
+                            # Legacy plain-text format, use as-is
+                            pass
                         self.sessions[sid] = UserSession(**sdata)
                 logger.info(f"Loaded {len(self.sessions)} sessions from disk")
             except Exception as e:
@@ -67,8 +75,8 @@ class AuthManager:
                         "session_id": session.session_id,
                         "user_id": session.user_id,
                         "email": session.email,
-                        "access_token": session.access_token,
-                        "session_token": session.session_token,
+                        "access_token": base64.b64encode(session.access_token.encode()).decode(),
+                        "session_token": base64.b64encode(session.session_token.encode()).decode(),
                         "expires_at": session.expires_at.isoformat(),
                         "created_at": session.created_at.isoformat(),
                         "request_count": session.request_count,
@@ -165,7 +173,7 @@ class AuthManager:
             expires_str = data.get("expires", "")
             try:
                 expires_at = datetime.fromisoformat(expires_str.replace("Z", "+00:00"))
-            except:
+            except Exception:
                 expires_at = datetime.now() + timedelta(hours=1)
 
             session = UserSession(

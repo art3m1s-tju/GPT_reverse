@@ -80,3 +80,6 @@ logs/
 
 # Project specific
 gpt_proxy.db
+browser_profile/
+test_profile/
+sessions.json

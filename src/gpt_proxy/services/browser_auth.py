@@ -18,7 +18,6 @@ class BrowserAuthManager:
 
     def __init__(self, profile_dir: str = "./browser_profile", proxy: str = None):
         self.profile_dir = Path(profile_dir)
-        self.profile_dir.mkdir(parents=True, exist_ok=True)
         self._playwright = None
         self._context: Optional[BrowserContext] = None
         # 代理设置，从环境变量或参数获取
@@ -30,6 +29,7 @@ class BrowserAuthManager:
         Args:
             headless: If False, shows browser window for user interaction
         """
+        self.profile_dir.mkdir(parents=True, exist_ok=True)
         self._playwright = await async_playwright().start()
 
         launch_options = {
@@ -42,7 +42,7 @@ class BrowserAuthManager:
 
         # 添加代理支持
         if self.proxy:
-            print(f">>> Browser: Using proxy: {self.proxy}")
+            logger.info(f"Using proxy: {self.proxy}")
             launch_options["proxy"] = {"server": self.proxy}
 
         self._context = await self._playwright.chromium.launch_persistent_context(**launch_options)
@@ -69,7 +69,6 @@ class BrowserAuthManager:
 
         try:
             logger.info("Navigating to ChatGPT...")
-            print(">>> Browser: Navigating to ChatGPT...")  # Debug output
             await page.goto(self.CHATGPT_URL, wait_until="networkidle", timeout=60000)
 
             # Check if already logged in
@@ -77,18 +76,15 @@ class BrowserAuthManager:
             for cookie in cookies:
                 if cookie["name"] == self.SESSION_COOKIE_NAME:
                     logger.info("Found existing session token")
-                    print(">>> Browser: Found existing session token")  # Debug output
                     return cookie["value"]
 
             if wait_for_login:
-                logger.info("Waiting for user to login...")
-                print(f">>> Browser: Waiting for user to login (timeout: {timeout}s)...")  # Debug output
+                logger.info(f"Waiting for user to login (timeout: {timeout}s)...")
                 # Wait for redirect to chat page (indicates successful login)
                 try:
                     await page.wait_for_url("**/chat*", timeout=timeout * 1000)
                 except Exception as e:
                     logger.warning(f"Login timeout or cancelled: {e}")
-                    print(f">>> Browser: Login timeout or cancelled: {e}")  # Debug output
                     return None
 
                 # Extract session token after login
@@ -96,14 +92,12 @@ class BrowserAuthManager:
                 for cookie in cookies:
                     if cookie["name"] == self.SESSION_COOKIE_NAME:
                         logger.info("Successfully extracted session token")
-                        print(">>> Browser: Successfully extracted session token")  # Debug output
                         return cookie["value"]
 
             return None
 
         except Exception as e:
-            logger.error(f"Error getting session token: {e}")
-            print(f">>> Browser Error: {e}")  # Debug output
+            logger.error(f"Browser error: {e}")
             return None
         finally:
             await page.close()
@@ -138,7 +132,7 @@ def get_browser_auth() -> BrowserAuthManager:
     # 确保代理设置正确
     if settings.browser_proxy and _browser_auth.proxy != settings.browser_proxy:
         _browser_auth.proxy = settings.browser_proxy
-        print(f">>> Browser: Updated proxy to: {settings.browser_proxy}")
+        logger.info(f"Updated proxy to: {settings.browser_proxy}")
 
     return _browser_auth
 

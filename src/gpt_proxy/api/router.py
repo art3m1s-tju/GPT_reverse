@@ -58,7 +58,7 @@ async def chat_completions(request: Request):
     try:
         data = json.loads(body)
         stream = data.get("stream", False)
-    except:
+    except Exception:
         stream = False
 
     if stream:

@@ -58,20 +58,22 @@ class TestAuthManager:
         assert manager.sessions["test-id"].is_active is False
 
     def test_list_sessions(self):
-        manager = AuthManager()
-        session = UserSession(
-            session_id="test-id",
-            user_id="user-123",
-            email="test@example.com",
-            access_token="token-123",
-            session_token="session-123",
-            expires_at=datetime.now() + timedelta(hours=1),
-        )
-        manager.create_session(session)
+        with patch.object(AuthManager, '_load_sessions'), \
+             patch.object(AuthManager, '_save_sessions'):
+            manager = AuthManager()
+            session = UserSession(
+                session_id="test-id",
+                user_id="user-123",
+                email="test@example.com",
+                access_token="token-123",
+                session_token="session-123",
+                expires_at=datetime.now() + timedelta(hours=1),
+            )
+            manager.create_session(session)
 
-        sessions = manager.list_sessions()
-        assert len(sessions) == 1
-        assert sessions[0]["email"] == "test@example.com"
+            sessions = manager.list_sessions()
+            assert len(sessions) == 1
+            assert sessions[0]["email"] == "test@example.com"
 
     @pytest.mark.asyncio
     async def test_get_valid_token(self):

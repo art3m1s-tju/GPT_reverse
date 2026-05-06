@@ -1,6 +1,6 @@
 [project]
 name = "gpt-proxy"
-version = "0.1.0"
+version = "0.2.0"
 description = "Local ChatGPT reverse proxy with API key management, rate limiting, and cost tracking"
 readme = "README.md"
 license = {text = "MIT"}

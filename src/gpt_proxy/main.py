@@ -4,11 +4,15 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
+from gpt_proxy import __version__
 from gpt_proxy.config import settings
 from gpt_proxy.services.auth_manager import close_auth_manager
 from gpt_proxy.services.browser_auth import close_browser_auth
 from gpt_proxy.api.router import router as api_router
 from gpt_proxy.api.auth_router import router as auth_router
+from gpt_proxy.middleware.rate_limit import RateLimitMiddleware
+from gpt_proxy.middleware.error_handler import proxy_error_handler, generic_error_handler, ProxyError
+from gpt_proxy.middleware.logging import LoggingMiddleware
 
 
 @asynccontextmanager
@@ -51,7 +55,7 @@ curl -X POST http://localhost:8000/v1/chat/completions \\
   -d '{"model": "gpt-4", "messages": [{"role": "user", "content": "Hello!"}]}'
 ```
 """,
-        version="0.2.0",
+        version=__version__,
         lifespan=lifespan,
         docs_url="/docs",
         redoc_url="/redoc",
@@ -60,11 +64,22 @@ curl -X POST http://localhost:8000/v1/chat/completions \\
     # Health check endpoints
     @app.get("/health")
     async def health_check():
-        return {"status": "healthy", "version": "0.2.0"}
+        return {"status": "healthy", "version": __version__}
 
     @app.get("/ready")
     async def readiness_check():
         return {"status": "ready"}
+
+    # Error handlers
+    app.add_exception_handler(ProxyError, proxy_error_handler)
+    app.add_exception_handler(Exception, generic_error_handler)
+
+    # Logging middleware
+    app.add_middleware(LoggingMiddleware)
+
+    # Rate limiting middleware
+    if settings.rate_limit_enabled:
+        app.add_middleware(RateLimitMiddleware, requests_per_minute=settings.rate_limit_requests_per_minute)
 
     # Include routers
     app.include_router(auth_router)
