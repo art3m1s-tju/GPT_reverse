@@ -57,6 +57,11 @@ class Settings(BaseSettings):
     http_timeout: float = 30.0
     http_connect_timeout: float = 10.0
 
+    # ChatGPT API settings
+    conversation_only: bool = False  # Skip sentinel verification (may trigger rate limits)
+    pow_difficulty: int = 3  # Minimum POW difficulty to solve (lower = harder)
+    arkose_token_url: str = ""  # Arkose token service URL (required for free accounts)
+
     @field_validator("openai_api_keys", mode="before")
     @classmethod
     def parse_keys(cls, v: str | list[str]) -> list[str]:

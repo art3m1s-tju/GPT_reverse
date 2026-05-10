@@ -1,7 +1,7 @@
 """Authentication manager for ChatGPT session tokens."""
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Literal
 import base64
 import httpx
@@ -14,6 +14,11 @@ from pathlib import Path
 from gpt_proxy.config import settings
 
 logger = getLogger(__name__)
+
+
+def utcnow() -> datetime:
+    """Get current UTC time with timezone info."""
+    return datetime.now(timezone.utc)
 
 
 @dataclass
@@ -33,7 +38,7 @@ class UserSession:
 class AuthManager:
     """Manage ChatGPT session-based authentication."""
 
-    CHATGPT_API_BASE = "https://chat.openai.com"
+    CHATGPT_API_BASE = "https://chatgpt.com"
     SESSION_API = f"{CHATGPT_API_BASE}/api/auth/session"
     BACKEND_API = f"{CHATGPT_API_BASE}/backend-api"
     SESSION_FILE = Path("./sessions.json")
@@ -51,8 +56,26 @@ class AuthManager:
                 with open(self.SESSION_FILE) as f:
                     data = json.load(f)
                     for sid, sdata in data.items():
-                        sdata["expires_at"] = datetime.fromisoformat(sdata["expires_at"])
-                        sdata["created_at"] = datetime.fromisoformat(sdata["created_at"])
+                        # Parse datetime, handling both naive and aware formats
+                        expires_at_str = sdata["expires_at"]
+                        created_at_str = sdata["created_at"]
+
+                        try:
+                            expires_at = datetime.fromisoformat(expires_at_str)
+                            created_at = datetime.fromisoformat(created_at_str)
+                        except ValueError:
+                            # Fallback for old format
+                            expires_at = datetime.fromisoformat(expires_at_str.replace("Z", "+00:00"))
+                            created_at = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
+
+                        # Ensure timezone-aware
+                        if expires_at.tzinfo is None:
+                            expires_at = expires_at.replace(tzinfo=timezone.utc)
+                        if created_at.tzinfo is None:
+                            created_at = created_at.replace(tzinfo=timezone.utc)
+
+                        sdata["expires_at"] = expires_at
+                        sdata["created_at"] = created_at
                         # Decode base64-encoded sensitive fields
                         try:
                             sdata["access_token"] = base64.b64decode(sdata["access_token"]).decode()
@@ -174,7 +197,7 @@ class AuthManager:
             try:
                 expires_at = datetime.fromisoformat(expires_str.replace("Z", "+00:00"))
             except Exception:
-                expires_at = datetime.now() + timedelta(hours=1)
+                expires_at = utcnow() + timedelta(hours=1)
 
             session = UserSession(
                 session_id=session_id,
@@ -289,7 +312,7 @@ class AuthManager:
             return None
 
         # Check if token is expired or about to expire (5 min buffer)
-        if datetime.now() >= session.expires_at - timedelta(minutes=5):
+        if utcnow() >= session.expires_at - timedelta(minutes=5):
             # Try to refresh
             if not await self.refresh_session(session_id):
                 return None

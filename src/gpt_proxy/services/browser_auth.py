@@ -13,7 +13,7 @@ logger = getLogger(__name__)
 class BrowserAuthManager:
     """Manage browser-based ChatGPT authentication with persistent profile."""
 
-    CHATGPT_URL = "https://chat.openai.com"
+    CHATGPT_URL = "https://chatgpt.com/auth/login"
     SESSION_COOKIE_NAME = "__Secure-next-auth.session-token"
 
     def __init__(self, profile_dir: str = "./browser_profile", proxy: str = None):
@@ -35,9 +35,15 @@ class BrowserAuthManager:
         launch_options = {
             "user_data_dir": str(self.profile_dir),
             "headless": headless,
+            "channel": "chrome",
             "viewport": {"width": 1280, "height": 800},
-            "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "locale": "en-US",
+            "args": [
+                "--disable-blink-features=AutomationControlled",
+                "--disable-features=IsolateOrigins,site-per-process",
+                "--no-sandbox",
+            ],
+            "ignore_default_args": ["--enable-automation"],
         }
 
         # 添加代理支持
@@ -45,7 +51,30 @@ class BrowserAuthManager:
             logger.info(f"Using proxy: {self.proxy}")
             launch_options["proxy"] = {"server": self.proxy}
 
-        self._context = await self._playwright.chromium.launch_persistent_context(**launch_options)
+        try:
+            self._context = await self._playwright.chromium.launch_persistent_context(**launch_options)
+        except Exception as e:
+            logger.warning(f"Failed to launch with channel='chrome' ({e}); falling back to bundled Chromium")
+            launch_options.pop("channel", None)
+            self._context = await self._playwright.chromium.launch_persistent_context(**launch_options)
+
+        # 抹掉 navigator.webdriver 等自动化指纹
+        await self._context.add_init_script(
+            """
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+            Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+            Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+            window.chrome = window.chrome || { runtime: {} };
+            const originalQuery = window.navigator.permissions && window.navigator.permissions.query;
+            if (originalQuery) {
+                window.navigator.permissions.query = (parameters) => (
+                    parameters.name === 'notifications'
+                        ? Promise.resolve({ state: Notification.permission })
+                        : originalQuery(parameters)
+                );
+            }
+            """
+        )
         logger.info(f"Browser initialized with profile: {self.profile_dir}")
 
     async def get_session_token(
@@ -69,7 +98,7 @@ class BrowserAuthManager:
 
         try:
             logger.info("Navigating to ChatGPT...")
-            await page.goto(self.CHATGPT_URL, wait_until="networkidle", timeout=60000)
+            await page.goto(self.CHATGPT_URL, wait_until="domcontentloaded", timeout=60000)
 
             # Check if already logged in
             cookies = await self._context.cookies()
@@ -80,19 +109,18 @@ class BrowserAuthManager:
 
             if wait_for_login:
                 logger.info(f"Waiting for user to login (timeout: {timeout}s)...")
-                # Wait for redirect to chat page (indicates successful login)
-                try:
-                    await page.wait_for_url("**/chat*", timeout=timeout * 1000)
-                except Exception as e:
-                    logger.warning(f"Login timeout or cancelled: {e}")
-                    return None
+                # 轮询 cookie，避免依赖 URL 模式（不同域名/路径都可能出现）
+                deadline = asyncio.get_event_loop().time() + timeout
+                while asyncio.get_event_loop().time() < deadline:
+                    cookies = await self._context.cookies()
+                    for cookie in cookies:
+                        if cookie["name"] == self.SESSION_COOKIE_NAME and cookie.get("value"):
+                            logger.info("Successfully extracted session token")
+                            return cookie["value"]
+                    await asyncio.sleep(2)
 
-                # Extract session token after login
-                cookies = await self._context.cookies()
-                for cookie in cookies:
-                    if cookie["name"] == self.SESSION_COOKIE_NAME:
-                        logger.info("Successfully extracted session token")
-                        return cookie["value"]
+                logger.warning("Login timeout: session cookie not found")
+                return None
 
             return None
 

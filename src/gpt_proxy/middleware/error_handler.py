@@ -60,6 +60,14 @@ async def proxy_error_handler(request: Request, exc: ProxyError) -> JSONResponse
 
 async def generic_error_handler(request: Request, exc: Exception) -> JSONResponse:
     """Handle generic exceptions."""
+    from fastapi import HTTPException
+
+    if isinstance(exc, HTTPException):
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": exc.detail},
+        )
+
     logger.exception(f"Unexpected error: {exc}")
 
     return JSONResponse(

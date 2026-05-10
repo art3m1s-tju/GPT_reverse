@@ -68,70 +68,78 @@ def version():
 
 @app.command()
 def login(
-    timeout: int = typer.Option(300, "--timeout", "-t", help="Login timeout in seconds"),
+    token: Optional[str] = typer.Option(
+        None,
+        "--token",
+        help="ChatGPT session token (__Secure-next-auth.session-token). If omitted, you'll be prompted.",
+    ),
+    server: str = typer.Option(
+        "http://localhost:8000", "--server", "-s", help="Proxy server URL"
+    ),
+    timeout: int = typer.Option(60, "--timeout", "-t", help="Request timeout in seconds"),
 ):
-    """Login via browser - opens a window for ChatGPT login."""
+    """Login by submitting a ChatGPT session token.
+
+    How to get the token:
+      1. Open https://chatgpt.com in your normal browser and login.
+      2. F12 -> Application -> Cookies -> chatgpt.com
+      3. Copy the value of '__Secure-next-auth.session-token'.
+      4. Run: gpt-proxy login --token <value>   (or run with no flag to be prompted)
+    """
     import httpx
 
-    console.print("[green]Opening browser for ChatGPT login...[/green]")
-    console.print("[yellow]Please login in the browser window.[/yellow]")
-    console.print("[cyan]Waiting for response (this may take a while)...[/cyan]")
+    if not token:
+        console.print("[yellow]Paste your ChatGPT session token (input hidden):[/yellow]")
+        token = typer.prompt("session_token", hide_input=True)
+
+    token = token.strip()
+    if not token:
+        console.print("[red]Empty token. Aborting.[/red]")
+        raise typer.Exit(code=1)
+
+    console.print("[cyan]Submitting token to proxy server...[/cyan]")
 
     try:
-        with httpx.Client(timeout=timeout + 60) as client:
+        with httpx.Client(timeout=timeout, trust_env=False) as client:
             response = client.post(
-                "http://localhost:8000/auth/login/browser",
-                params={"timeout": timeout},
+                f"{server.rstrip('/')}/auth/login",
+                json={"session_token": token},
             )
 
             if response.status_code == 200:
                 data = response.json()
-                console.print(f"[green]Login successful![/green]")
+                console.print("[green]Login successful![/green]")
                 console.print(f"[cyan]Email: {data['user_email']}[/cyan]")
                 console.print(f"[cyan]Session ID: {data['session_id']}[/cyan]")
                 console.print("")
                 console.print("[yellow]Use this session_id as Bearer token:[/yellow]")
                 console.print(f"[white]Authorization: Bearer {data['session_id']}[/white]")
-            elif response.status_code == 401:
-                error_detail = "Unknown error"
-                try:
-                    error_data = response.json()
-                    error_detail = error_data.get("detail", str(error_data))
-                except Exception:
-                    error_detail = response.text or "Unknown error"
+                return
 
-                console.print(f"[red]Login failed: {error_detail}[/red]")
+            error_detail = "Unknown error"
+            try:
+                error_data = response.json()
+                error_detail = error_data.get("detail", str(error_data))
+            except Exception:
+                error_detail = response.text or "Unknown error"
+
+            console.print(
+                f"[red]Login failed (status {response.status_code}): {error_detail}[/red]"
+            )
+            if response.status_code == 401:
                 console.print("")
-                console.print("[yellow]Troubleshooting tips:[/yellow]")
-                if "cloudflare" in error_detail.lower():
-                    console.print("  [red]Cloudflare challenge detected[/red]")
-                    console.print("  - Try logging in via browser first, then retry")
-                    console.print("  - Consider using a different IP or waiting")
-                elif "timeout" in error_detail.lower():
-                    console.print("  [red]Login took too long[/red]")
-                    console.print("  - Try increasing timeout: gpt-proxy login --timeout 600")
-                elif "proxy" in error_detail.lower() or "connection" in error_detail.lower():
-                    console.print("  [red]Connection/Proxy issue[/red]")
-                    console.print("  - Check your proxy settings in .env (BROWSER_PROXY)")
-                    console.print("  - Verify the proxy URL is correct and accessible")
-                else:
-                    console.print("  [red]Possible causes:[/red]")
-                    console.print("  - Your session may have expired")
-                    console.print("  - Try clearing browser profile: rm -rf ./browser_profile")
-                    console.print("  - Ensure you can access chat.openai.com in your browser")
-            else:
-                console.print(f"[red]Login failed with status {response.status_code}[/red]")
-                console.print(f"[dim]{response.text[:200] if response.text else 'No response body'}[/dim]")
+                console.print("[yellow]Common causes:[/yellow]")
+                console.print("  - Token expired or copied incompletely (it's long — make sure you got all of it)")
+                console.print("  - Wrong cookie copied; the right one is '__Secure-next-auth.session-token'")
+                console.print("  - Server can't reach chatgpt.com (check BROWSER_PROXY in .env)")
 
     except httpx.ConnectError:
         console.print("[red]Error: Could not connect to server.[/red]")
-        console.print("[yellow]Make sure the server is running: gpt-proxy serve[/yellow]")
+        console.print("[yellow]Start it first: gpt-proxy serve[/yellow]")
     except httpx.TimeoutException:
         console.print("[red]Error: Request timed out.[/red]")
-        console.print("[yellow]Try increasing timeout: gpt-proxy login --timeout 600[/yellow]")
     except Exception as e:
         console.print(f"[red]Unexpected error: {e}[/red]")
-        console.print("[yellow]Check server logs for more details.[/yellow]")
 
 
 if __name__ == "__main__":
